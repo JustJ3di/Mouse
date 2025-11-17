@@ -2,280 +2,326 @@
 #include <string.h>
 #include <stdlib.h>
 
-typedef enum tagtype { MACRO, PARAM, LOOP } TAGTYPE;
-typedef struct frametipe {
-    TAGTYPE TAG;
-    int POS, OFF;
-} FRAMETYPE;
+#define MAX_PROG 500
+#define MAX_STACK 20
+#define MAX_DATA 260
 
-char PROG[500 + 2]; 
-int DEFINITION[26], CALSTACK[20];
-FRAMETYPE STACK[20];
-int DATA[260];
-int CAL, CHPOS, LEVEL, OFFSET, PARNUM, PARBAL, TEMP;
-char CH;
+// Tipi di frame per gestire macro, parametri e loop
+typedef enum FrameType { FRAME_MACRO, FRAME_PARAM, FRAME_LOOP } FrameType;
 
-int NUM(char CH) {
-    return CH - 'A';
+// Frame dello stack
+typedef struct {
+    FrameType type;
+    int pos;
+    int offset;
+} Frame;
+
+/* --------------------------------------------------------------------------
+ * Variabili globali
+ * -------------------------------------------------------------------------- */
+
+char PROG[MAX_PROG + 2];
+int DEF_MACRO[26];
+int calcStack[MAX_STACK];
+Frame frameStack[MAX_STACK];
+int DATA[MAX_DATA];
+
+int calcTop = 0;
+int charPos = -1;
+int frameLevel = 0;
+int offset = 0;
+char currentChar;
+
+/* --------------------------------------------------------------------------
+ * Utility
+ * -------------------------------------------------------------------------- */
+
+static inline int idxFromLetter(char c) { return c - 'A'; }
+static inline int digitVal(char c) { return c - '0'; }
+
+// Legge il prossimo carattere dal programma
+void nextChar() {
+    if (charPos + 1 >= MAX_PROG)
+        currentChar = '\0';
+    else
+        currentChar = PROG[++charPos];
 }
 
-int VAL(char CH) {
-    return CH - '0';
-}
-
-void GETCHAR() {
-   
-    if (CHPOS + 1 >= 500) {
-        CH = '\0';
-        CHPOS++;
-    } else {
-        CH = PROG[++CHPOS];
-    }
-}
-
-void PUSHCAL(int DATANUM) {
-    if (CAL < 20) CALSTACK[CAL++] = DATANUM;
-    else {
-        fprintf(stderr, "CALSTACK overflow\n");
+// Stack per calcoli
+void pushCalc(int value) {
+    if (calcTop >= MAX_STACK) {
+        fprintf(stderr, "Error: Calculation stack overflow.\n");
         exit(1);
     }
+    calcStack[calcTop++] = value;
 }
 
-int POPCAL() {
-    if (CAL <= 0) {
-        fprintf(stderr, "CALSTACK underflow\n");
+int popCalc() {
+    if (calcTop <= 0) {
+        fprintf(stderr, "Error: Calculation stack underflow.\n");
         exit(1);
     }
-    return CALSTACK[--CAL];
+    return calcStack[--calcTop];
 }
 
-void PUSH(TAGTYPE TAGVAL) {
-    if (LEVEL < 20) {
-        STACK[LEVEL].TAG = TAGVAL;
-        STACK[LEVEL].POS = CHPOS;
-        STACK[LEVEL].OFF = OFFSET;
-        LEVEL++;
-    } else {
-        fprintf(stderr, "STACK overflow\n");
+// Stack per macro/loop/parametri
+void pushFrame(FrameType type) {
+    if (frameLevel >= MAX_STACK) {
+        fprintf(stderr, "Error: Frame stack overflow.\n");
         exit(1);
+    }
+    frameStack[frameLevel].type = type;
+    frameStack[frameLevel].pos = charPos;
+    frameStack[frameLevel].offset = offset;
+    frameLevel++;
+}
+
+void popFrame() {
+    if (frameLevel <= 0) {
+        fprintf(stderr, "Error: Frame stack underflow.\n");
+        exit(1);
+    }
+
+    frameLevel--;
+    charPos = frameStack[frameLevel].pos;
+    offset = frameStack[frameLevel].offset;
+}
+
+// Salta blocchi annidati come [ ... ] o ( ... ) o # ... ;
+void skipUntil(char open, char close) {
+    int count = 1;
+
+    while (count > 0) {
+        nextChar();
+
+        if (currentChar == '\0')
+            break;
+
+        if (currentChar == open) count++;
+        else if (currentChar == close) count--;
     }
 }
 
-void POP() {
-    if (LEVEL <= 0) {
-        fprintf(stderr, "STACK underflow\n");
-        exit(1);
-    }
-    LEVEL--;
-    CHPOS = STACK[LEVEL].POS;
-    OFFSET = STACK[LEVEL].OFF;
-}
-
-void SKIP(char LCH, char RCH) {
-    int CNT = 1;
-    do {
-        GETCHAR();
-        if (CH == LCH)
-            CNT++;
-        else if (CH == RCH)
-            CNT--;
-        if (CH == '\0') break;
-    } while (CNT != 0);
-}
+/* --------------------------------------------------------------------------
+ * MAIN
+ * -------------------------------------------------------------------------- */
 
 int main(int argc, char const *argv[]) {
+
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s progfile\n", argv[0]);
+        fprintf(stderr, "Usage: %s programfile\n", argv[0]);
         return 1;
     }
 
+    // Caricamento del file
     FILE *fp = fopen(argv[1], "rb");
-    size_t size = 0;
-    if (fp != NULL) {
-        if (fseek(fp, 0, SEEK_END) == 0) {
-            long t = ftell(fp);
-            if (t > 0 && t <= 500) {
-                size = (size_t)t;
-                fseek(fp, 0, SEEK_SET);
-                size_t read = fread(PROG, 1, size, fp);
-                PROG[read] = '\0';
-            } else {
-                fseek(fp, 0, SEEK_SET);
-                size = fread(PROG, 1, 500, fp);
-                PROG[size] = '\0';
-            }
-        }
-        fclose(fp);
-    } else {
+    if (!fp) {
         fprintf(stderr, "Cannot open file %s\n", argv[1]);
         return 1;
     }
 
-    for (int i = 0; i < 26; i++) DEFINITION[i] = 0;
-    CAL = 0; CHPOS = -1; LEVEL = 0; OFFSET = 0;
-    for (int i = 0; i < 260; i++) DATA[i] = 0;
+    size_t size = fread(PROG, 1, MAX_PROG, fp);
+    PROG[size] = '\0';
+    fclose(fp);
 
-  
-    int pos = -1;
-    char last = 0;
-    char this = 0;
+    memset(DEF_MACRO, 0, sizeof(DEF_MACRO));
+    memset(DATA, 0, sizeof(DATA));
+
+    calcTop = 0;
+    frameLevel = 0;
+    charPos = -1;
+    offset = 0;
+
+    /* ----------------------------------------------------------------------
+     * 1. Pre-scan per trovare definizioni macro: $$X
+     * ---------------------------------------------------------------------- */
+    char prev = 0, curr = 0;
+    for (int pos = 0; pos <= (int)size; pos++) {
+        prev = curr;
+        curr = PROG[pos];
+
+        if (prev == '$' && curr >= 'A' && curr <= 'Z')
+            DEF_MACRO[idxFromLetter(curr)] = pos + 1;
+
+        if (prev == '$' && curr == '$')
+            break;
+    }
+
+    /* ----------------------------------------------------------------------
+     * 2. Esecuzione del programma
+     * ---------------------------------------------------------------------- */
+    charPos = -1;
+
     do {
-        last = this;
-        pos++;
-        if ((size_t)pos <= size)
-            this = PROG[pos];
-        else
-            this = '\0';
+        nextChar();
 
-        if (last == '$' && this >= 'A' && this <= 'Z') {
-            
-            DEFINITION[NUM(this)] = pos + 1;
-        }
+        switch (currentChar) {
 
-    } while (!((this == '$') && (last == '$')) && pos < (int)size && this != '\0');
-
-    CHPOS = -1; LEVEL = 0; OFFSET = 0; CAL = 0;
-    do {
-        GETCHAR();
-        switch (CH) {
         case ' ': case ']': case '$':
             break;
-        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
-            TEMP = 0;
-            while (CH >= '0' && CH <= '9') {
-                TEMP = 10 * TEMP + VAL(CH);
-                GETCHAR();
+
+        case '0' ... '9': {
+            int num = 0;
+            while (currentChar >= '0' && currentChar <= '9') {
+                num = num * 10 + digitVal(currentChar);
+                nextChar();
             }
-            PUSHCAL(TEMP);
-           
-            CHPOS--;
-            if (CHPOS < -1) CHPOS = -1;
+            pushCalc(num);
+
+            // Correggi il posizionamento del carattere letto in più
+            charPos--;
             break;
-        case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J':
-        case 'K': case 'L': case 'M': case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T':
-        case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
-            PUSHCAL(NUM(CH) + OFFSET);
+        }
+
+        case 'A' ... 'Z':
+            pushCalc(idxFromLetter(currentChar) + offset);
             break;
-        case '?':
-            TEMP = getchar();
-            PUSHCAL(TEMP);
+
+        case '?': {
+            int ch = getchar();
+            pushCalc(ch);
             break;
+        }
+
         case '!':
-            putchar(POPCAL());
+            putchar(popCalc());
             break;
-        case '+':
-            PUSHCAL(POPCAL() + POPCAL());
+
+        case '+': pushCalc(popCalc() + popCalc()); break;
+        case '*': pushCalc(popCalc() * popCalc()); break;
+
+        case '-': {
+            int b = popCalc();
+            pushCalc(popCalc() - b);
             break;
-        case '-':
-            TEMP = POPCAL();
-            PUSHCAL(POPCAL() - TEMP);
-            break;
-        case '*':
-            PUSHCAL(POPCAL() * POPCAL());
-            break;
+        }
+
         case '/': {
-            TEMP = POPCAL();
-            PUSHCAL(POPCAL() / TEMP);
-        } break;
+            int b = popCalc();
+            pushCalc(popCalc() / b);
+            break;
+        }
+
+        // read memory
         case '.':
-            PUSHCAL(DATA[POPCAL()]);
+            pushCalc(DATA[popCalc()]);
             break;
+
+        // write memory
         case '=': {
-            TEMP = POPCAL();
-            DATA[POPCAL()] = TEMP;
-        } break;
+            int val = popCalc();
+            DATA[popCalc()] = val;
+            break;
+        }
+
+        // string literal
         case '\"':
-            do {
-                GETCHAR();
-                if (CH == '!')
+            while (1) {
+                nextChar();
+                if (currentChar == '\"' || currentChar == '\0')
+                    break;
+
+                if (currentChar == '!')
                     putchar('\n');
-                else if (CH != '\"' && CH != '\0')
-                    putchar(CH);
-            } while (CH != '\"' && CH != '\0');
+                else
+                    putchar(currentChar);
+            }
             break;
+
         case '[':
-            if (POPCAL() <= 0) {
-                SKIP('[', ']');
-            }
+            if (popCalc() <= 0)
+                skipUntil('[', ']');
             break;
+
         case '(':
-            PUSH(LOOP);
+            pushFrame(FRAME_LOOP);
             break;
+
         case '^':
-            if (POPCAL() <= 0) {
-                SKIP('(', ')');
-            }
+            if (popCalc() <= 0)
+                skipUntil('(', ')');
             break;
+
         case ')':
-            if (LEVEL > 0) {
-                CHPOS = STACK[LEVEL - 1].POS;
-            }
+            if (frameLevel > 0)
+                charPos = frameStack[frameLevel - 1].pos;
             break;
-        case '#': {
-            GETCHAR();
-            if (CH >= 'A' && CH <= 'Z' && DEFINITION[NUM(CH)] > 0) {
-                PUSH(MACRO);
-                CHPOS = DEFINITION[NUM(CH)];
-                OFFSET = OFFSET + 26;
+
+        case '#': { // macro call
+            nextChar();
+            if (currentChar >= 'A' && currentChar <= 'Z'
+                && DEF_MACRO[idxFromLetter(currentChar)] > 0) {
+
+                pushFrame(FRAME_MACRO);
+                charPos = DEF_MACRO[idxFromLetter(currentChar)];
+                offset += 26;
+
             } else {
-                SKIP('#', ';');
+                skipUntil('#', ';');
             }
-        } break;
-        case '@':
-            POP();
-            SKIP('#', ';');
             break;
-        case '%': {
-            GETCHAR();
-            if (!(CH >= 'A' && CH <= 'Z')) break;
-            PARNUM = NUM(CH);
-            PUSH(PARAM);
-            PARBAL = 1;
-            TEMP = LEVEL;
-            do {
-                TEMP--;
-                if (TEMP < 0) break;
-                switch (STACK[TEMP].TAG) {
-                case MACRO:
-                    PARBAL--;
-                    break;
-                case PARAM:
-                    PARBAL++;
-                    break;
-                case LOOP:
-                    break;
-                }
-            } while (PARBAL != 0 && TEMP > 0);
-            if (TEMP < 0) {
-                /* non trovato */
-                POP();
+        }
+
+        case '@': // exit macro
+            popFrame();
+            skipUntil('#', ';');
+            break;
+
+        case '%': { // parameter reference
+            nextChar();
+            if (!(currentChar >= 'A' && currentChar <= 'Z')) break;
+
+            int paramIndex = idxFromLetter(currentChar);
+            pushFrame(FRAME_PARAM);
+
+            int balance = 1;
+            int t = frameLevel - 1;
+
+            while (t >= 0 && balance != 0) {
+                if (frameStack[t].type == FRAME_MACRO) balance--;
+                else if (frameStack[t].type == FRAME_PARAM) balance++;
+                t--;
+            }
+
+            if (t < 0) {
+                popFrame();
                 break;
             }
-            CHPOS = STACK[TEMP].POS;
-            OFFSET = STACK[TEMP].OFF;
+
+            charPos = frameStack[t].pos;
+            offset = frameStack[t].offset;
+
             do {
-                GETCHAR();
-                if (CH == '#') {
-                    SKIP('#', ';');
-                    GETCHAR();
+                nextChar();
+
+                if (currentChar == '#') {
+                    skipUntil('#', ';');
+                    nextChar();
                 }
-                if (CH == ',') {
-                    PARNUM--;
-                }
-                if (CH == '\0') break;
-            } while (PARNUM != 0 || CH != ';');
-            if (CH == ';') {
-                POP();
-            }
-        } break;
+                if (currentChar == ',')
+                    paramIndex--;
+
+                if (currentChar == '\0') break;
+
+            } while (paramIndex != 0 || currentChar != ';');
+
+            if (currentChar == ';')
+                popFrame();
+
+            break;
+        }
+
         case ',':
         case ';':
-            POP();
+            popFrame();
             break;
+
         default:
             break;
         }
-    } while (CH != '$' && CH != '\0');
+
+    } while (currentChar != '$' && currentChar != '\0');
 
     return 0;
 }
+
