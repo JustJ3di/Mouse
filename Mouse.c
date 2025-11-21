@@ -6,10 +6,10 @@
 #define MAX_STACK 20
 #define MAX_DATA 260
 
-// Tipi di frame per gestire macro, parametri e loop
+
 typedef enum FrameType { FRAME_MACRO, FRAME_PARAM, FRAME_LOOP } FrameType;
 
-// Frame dello stack
+
 typedef struct {
     FrameType type;
     int pos;
@@ -39,7 +39,7 @@ char currentChar;
 static inline int idxFromLetter(char c) { return c - 'A'; }
 static inline int digitVal(char c) { return c - '0'; }
 
-// Legge il prossimo carattere dal programma
+
 void nextChar() {
     if (charPos + 1 >= MAX_PROG)
         currentChar = '\0';
@@ -47,7 +47,7 @@ void nextChar() {
         currentChar = PROG[++charPos];
 }
 
-// Stack per calcoli
+
 void pushCalc(int value) {
     if (calcTop >= MAX_STACK) {
         fprintf(stderr, "Error: Calculation stack overflow.\n");
@@ -64,7 +64,7 @@ int popCalc() {
     return calcStack[--calcTop];
 }
 
-// Stack per macro/loop/parametri
+
 void pushFrame(FrameType type) {
     if (frameLevel >= MAX_STACK) {
         fprintf(stderr, "Error: Frame stack overflow.\n");
@@ -87,7 +87,6 @@ void popFrame() {
     offset = frameStack[frameLevel].offset;
 }
 
-// Salta blocchi annidati come [ ... ] o ( ... ) o # ... ;
 void skipUntil(char open, char close) {
     int count = 1;
 
@@ -113,7 +112,6 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
 
-    // Caricamento del file
     FILE *fp = fopen(argv[1], "rb");
     if (!fp) {
         fprintf(stderr, "Cannot open file %s\n", argv[1]);
@@ -132,9 +130,7 @@ int main(int argc, char const *argv[]) {
     charPos = -1;
     offset = 0;
 
-    /* ----------------------------------------------------------------------
-     * 1. Pre-scan per trovare definizioni macro: $$X
-     * ---------------------------------------------------------------------- */
+
     char prev = 0, curr = 0;
     for (int pos = 0; pos <= (int)size; pos++) {
         prev = curr;
@@ -147,9 +143,7 @@ int main(int argc, char const *argv[]) {
             break;
     }
 
-    /* ----------------------------------------------------------------------
-     * 2. Esecuzione del programma
-     * ---------------------------------------------------------------------- */
+
     charPos = -1;
 
     do {
@@ -168,7 +162,6 @@ int main(int argc, char const *argv[]) {
             }
             pushCalc(num);
 
-            // Correggi il posizionamento del carattere letto in più
             charPos--;
             break;
         }
