@@ -16,9 +16,7 @@ typedef struct {
     int offset;
 } Frame;
 
-/* --------------------------------------------------------------------------
- * Variabili globali
- * -------------------------------------------------------------------------- */
+
 
 char PROG[MAX_PROG + 2];
 int DEF_MACRO[26];
@@ -32,9 +30,7 @@ int frameLevel = 0;
 int offset = 0;
 char currentChar;
 
-/* --------------------------------------------------------------------------
- * Utility
- * -------------------------------------------------------------------------- */
+
 
 static inline int idxFromLetter(char c) { return c - 'A'; }
 static inline int digitVal(char c) { return c - '0'; }
